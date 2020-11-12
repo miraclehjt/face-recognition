@@ -1,0 +1,135 @@
+<template>
+	<view>
+		<live-pusher style="height:350px" id='livePusher' url="" mode="FHD" :muted="true" aspect="1:1"></live-pusher>
+		<input type="text" v-model="id" style="margin-top:10px;" placeholder="拍照入库前请输入你名字的拼音" />
+		<button type="default" @tap="snapshot">拍照入库</button>
+		<button type="default" @tap="action" style="margin-top:10px;">开始人脸识别</button>
+	</view>
+</template>
+
+<script>
+	export default {
+		data() {
+			return {
+				context: null,
+				access_token: "",
+				id: "",
+			}
+		},
+		onShow() {
+			let that = this;
+			plus.android.requestPermissions(
+				["android.permission.CAMERA"],
+				function(e) {
+					if (e.deniedAlways.length > 0) {
+						console.log("永久禁用")
+					}
+					if (e.deniedPresent.length > 0) {
+						console.log("临时禁用")
+					}
+					if (e.granted.length > 0) {
+						that.context = uni.createLivePusherContext("livePusher", that);
+						that.startPreview();
+						uni.request({
+							url: "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=bUjgL91NtnQi8ubPVq5ag964&client_secret=f9QGCStWUoZ2P04HNmGRpmxvkGllBVuV",
+							success: (res) => {
+								that.access_token = res.data.access_token;
+							}
+						})
+						console.log("允许使用")
+					}
+				},
+				function() {
+
+				}
+			)
+
+		},
+		methods: {
+			action() {
+				uni.redirectTo({
+					url: "/pages/action/action"
+				})
+			},
+			startPreview() { //开启视频预览
+				this.context.startPreview()
+			},
+			snapshot() { //对视频截取
+				this.context.snapshot({
+					success: (res) => {
+						this.toBase64(plus.io.convertAbsoluteFileSystem(res.message.tempImagePath)).then(res => {
+							this.upload(res);
+						});
+					}
+				})
+			},
+			upload(file) {
+				if (!this.id) {
+					uni.showModal({
+						title: '提示',
+						content: '请输入你名字的拼音',
+						showCancel: false
+					});
+					return;
+				}
+				uni.showLoading({
+					mask: true
+				});
+				uni.request({ //入库
+					method: "POST",
+					url: "https://aip.baidubce.com/rest/2.0/face/v3/faceset/user/add?access_token=" + this.access_token, //
+					data: {
+						image: file,
+						image_type: "BASE64",
+						group_id: "1",
+						user_id: this.id,
+					},
+					success: ({
+						data
+					}) => {
+						this.id = "";
+						uni.hideLoading();
+						if (data.error_code == 0) {
+							uni.showToast({
+								title: "入库成功"
+							})
+						} else {
+							uni.showToast({
+								icon: "none",
+								title: data.error_msg
+							});
+						}
+					},
+					fail: () => {
+						this.id = "";
+						uni.hideLoading();
+						uni.showToast({
+							icon: "none",
+							title: "请求发送失败"
+						});
+					}
+				})
+			},
+			toBase64(url) {
+				return new Promise((res, rej) => {
+					plus.io.resolveLocalFileSystemURL(url, file => {
+						file.file(vf => {
+							let fileReader = new plus.io.FileReader();
+							fileReader.readAsDataURL(vf);
+							fileReader.onloadend = result => {
+								let base64 = result.target.result.match(/(?<=base64,).+/);
+								res(base64[0]); // 文件BASE64编码内容
+							}
+						})
+					}, error => {
+						rej()
+					})
+				})
+			},
+		}
+	}
+</script>
+
+<style lang="scss" scoped>
+
+</style>

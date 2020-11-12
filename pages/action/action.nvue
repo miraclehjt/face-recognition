@@ -1,0 +1,160 @@
+<template>
+	<view>
+		<div class="livefater">
+			<div style="width: 350px;height: 350px;border-radius: 350px;overflow: hidden;background-color: #CCCCCC;">
+				<live-pusher class="livePusher" id='livePusher' url="" mode="FHD" :muted="true" aspect="1:1"></live-pusher>
+			</div>
+			<cover-image src="../../static/gai.png" class="gaiimg"></cover-image>
+			<button type="default" @tap="goBack()">返回</button>
+		</div>
+	</view>
+</template>
+
+<script>
+	export default {
+		data() {
+			return {
+				context: null,
+				access_token: "",
+				fileList: [],
+			}
+		},
+		onReady() {
+			this.context = uni.createLivePusherContext("livePusher", this);
+			uni.request({
+				url: "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=bUjgL91NtnQi8ubPVq5ag964&client_secret=f9QGCStWUoZ2P04HNmGRpmxvkGllBVuV",
+				success: (res) => {
+					this.access_token = res.data.access_token;
+					this.search();
+				}
+			})
+		},
+		methods: {
+			search() {
+				this.context.startPreview({
+					success: () => {
+						this.snapshot()
+					}
+				})
+			},
+			snapshot(index = 1) { //对视频截取
+				this.context.snapshot({
+					success: (res) => {
+						let newPath = plus.io.convertAbsoluteFileSystem(res.message.tempImagePath);
+						this.toBase64(newPath).then(res => {
+							uni.removeSavedFile({
+								filePath: newPath,
+							});
+							this.upload(res).then(({
+								state,
+								msg
+							}) => {
+								if (state == "success") {
+									uni.showModal({
+										title: '搜索成功',
+										content: `该人脸来自于${msg.group_id}组，人脸id为${msg.user_id},匹配度为${msg.score}`,
+										showCancel: false,
+									});
+									return;
+								} else if (state == "error" && index >= 5) {
+									uni.showModal({
+										title: '搜索失败',
+										content: "原因：" + msg,
+										confirmText: "重试",
+										success: (isConfirm) => {
+											if (isConfirm.confirm) {
+												this.snapshot()
+											}
+										}
+									});
+									return;
+								} else if (state == "error") {
+									this.snapshot(index + 1)
+								}
+							});
+						});
+					}
+				})
+			},
+			upload(file) {
+				return new Promise((res, rej) => {
+					uni.request({
+						method: "POST",
+						url: "https://aip.baidubce.com/rest/2.0/face/v3/search?access_token=" + this.access_token,
+						data: {
+							image: file,
+							image_type: "BASE64",
+							group_id_list: "1",
+							liveness_control: "NORMAL"
+						},
+						success({
+							data
+						}) {
+							if (data.error_code == 0) {
+								let {
+									user_id,
+									group_id,
+									score
+								} = data.result.user_list[0]
+								if (score < 80) {
+									res({
+										state: "error",
+										msg: "该人脸与库中所有人脸匹配度均不足"
+									})
+								} else {
+									res({
+										state: "success",
+										msg: {
+											user_id,
+											group_id,
+											score
+										}
+									})
+								}
+							} else {
+								res({
+									state: "error",
+									msg: data.error_msg
+								})
+							}
+						}
+					})
+				})
+			},
+			toBase64(url) {
+				return new Promise((res, rej) => {
+					plus.io.resolveLocalFileSystemURL(url, file => {
+						file.file(vf => {
+							let fileReader = new plus.io.FileReader();
+							fileReader.readAsDataURL(vf);
+							fileReader.onloadend = result => {
+								let base64 = result.target.result.match(/(?<=base64,).+/);
+								res(base64[0]); // 文件BASE64编码内容
+							}
+						})
+					}, error => {
+						rej()
+					})
+				})
+			},
+			goBack() {
+				uni.redirectTo({
+					url: "/pages/index/index"
+				})
+			}
+		}
+	}
+</script>
+
+<style lang="scss" scoped>
+	.livePusher {
+		width: 350px;
+		height: 350px;
+	}
+
+	.gaiimg {
+		width: 350px;
+		height: 350px;
+		margin-top: -350px;
+	}
+</style>
